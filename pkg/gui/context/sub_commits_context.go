@@ -5,6 +5,7 @@ import (
 
 	"github.com/jesseduffield/lazygit/pkg/commands/git_commands"
 	"github.com/jesseduffield/lazygit/pkg/commands/models"
+	"github.com/jesseduffield/lazygit/pkg/config"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/jesseduffield/lazygit/pkg/gui/presentation"
 	"github.com/jesseduffield/lazygit/pkg/gui/types"
@@ -64,6 +65,7 @@ func NewSubCommitsContext(
 			viewModel.GetRef().RefName(),
 			hasRebaseUpdateRefsConfig,
 			c.State().GetRepoState().GetScreenMode() != types.SCREEN_NORMAL,
+			commitColumnOrderForScreenMode(c.State().GetRepoState().GetScreenMode(), c.UserConfig().Gui.CommitColumnOrder),
 			c.Modes().CherryPicking.SelectedHashSet(),
 			c.Modes().Diffing.Ref,
 			"",
@@ -222,7 +224,18 @@ func (self *SubCommitsContext) RefForAdjustingLineNumberInDiff() string {
 }
 
 func (self *SubCommitsContext) ModelSearchResults(searchStr string, caseSensitive bool) []gocui.SearchPosition {
-	return searchModelCommits(caseSensitive, self.GetCommits(), self.ColumnPositions(), self.modelToViewIndexConverter(), searchStr)
+	return searchModelCommits(
+		caseSensitive,
+		self.GetCommits(),
+		self.ColumnPositions(),
+		commitColumnIndexForScreenMode(
+			self.c.State().GetRepoState().GetScreenMode(),
+			self.c.UserConfig().Gui.CommitColumnOrder,
+			config.CommitColumnHash,
+		),
+		self.modelToViewIndexConverter(),
+		searchStr,
+	)
 }
 
 func (self *SubCommitsContext) IndexForGotoBottom() int {

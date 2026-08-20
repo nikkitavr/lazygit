@@ -62,6 +62,7 @@ func NewLocalCommitsContext(c *ContextCommon) *LocalCommitsContext {
 			c.Model().CheckedOutBranch,
 			hasRebaseUpdateRefsConfig,
 			c.State().GetRepoState().GetScreenMode() != types.SCREEN_NORMAL,
+			commitColumnOrderForScreenMode(c.State().GetRepoState().GetScreenMode(), c.UserConfig().Gui.CommitColumnOrder),
 			c.Modes().CherryPicking.SelectedHashSet(),
 			c.Modes().Diffing.Ref,
 			c.Modes().MarkedBaseCommit.GetHash(),
@@ -79,6 +80,10 @@ func NewLocalCommitsContext(c *ContextCommon) *LocalCommitsContext {
 
 	getNonModelItems := func() []*NonModelItem {
 		result := []*NonModelItem{}
+		messageColumn := commitMessageColumnForScreenMode(
+			c.State().GetRepoState().GetScreenMode(),
+			c.UserConfig().Gui.CommitColumnOrder,
+		)
 		if c.Model().WorkingTreeStateAtLastCommitRefresh.CanShowTodos() {
 			if c.Model().WorkingTreeStateAtLastCommitRefresh.Rebasing {
 				result = append(result, &NonModelItem{
@@ -113,6 +118,7 @@ func NewLocalCommitsContext(c *ContextCommon) *LocalCommitsContext {
 				c.Tr.MovingCommitsHere,
 				c.UserConfig().Gui.Spinner,
 				time.Now(),
+				messageColumn,
 			)
 
 			_, firstRealCommit, found := lo.FindIndexOf(
@@ -134,6 +140,7 @@ func NewLocalCommitsContext(c *ContextCommon) *LocalCommitsContext {
 				c.Tr.MovingCommitsHere,
 				c.UserConfig().Gui.Spinner,
 				time.Now(),
+				messageColumn,
 			)
 		}
 
@@ -175,6 +182,7 @@ func addCommitDropIndicator(
 	movingLabel string,
 	spinnerConfig config.SpinnerConfig,
 	now time.Time,
+	column int,
 ) []*NonModelItem {
 	if indicator.insertionIndex < 0 {
 		return items
@@ -195,7 +203,7 @@ func addCommitDropIndicator(
 	return slices.Insert(items, insertAt, &NonModelItem{
 		Index:   indicator.insertionIndex,
 		Content: style.FgCyan.SetBold().Sprintf("━━━━━━ %s ━━━━━━", label),
-		Column:  6, // align with the commit subject
+		Column:  column,
 	})
 }
 
@@ -300,7 +308,18 @@ func (self *LocalCommitsContext) RefForAdjustingLineNumberInDiff() string {
 }
 
 func (self *LocalCommitsContext) ModelSearchResults(searchStr string, caseSensitive bool) []gocui.SearchPosition {
-	return searchModelCommits(caseSensitive, self.GetCommits(), self.ColumnPositions(), self.modelToViewIndexConverter(), searchStr)
+	return searchModelCommits(
+		caseSensitive,
+		self.GetCommits(),
+		self.ColumnPositions(),
+		commitColumnIndexForScreenMode(
+			self.ListContextTrait.c.State().GetRepoState().GetScreenMode(),
+			self.ListContextTrait.c.UserConfig().Gui.CommitColumnOrder,
+			config.CommitColumnHash,
+		),
+		self.modelToViewIndexConverter(),
+		searchStr,
+	)
 }
 
 func (self *LocalCommitsViewModel) SetLimitCommits(value bool) {
@@ -349,8 +368,31 @@ func shouldShowGraph(c *ContextCommon) bool {
 	return false
 }
 
+func commitColumnOrderForScreenMode(screenMode types.ScreenMode, order config.CommitColumnOrder) config.CommitColumnOrder {
+	if screenMode == types.SCREEN_HALF {
+		return order
+	}
+	return nil
+}
+
+func commitColumnIndexForScreenMode(
+	screenMode types.ScreenMode,
+	order config.CommitColumnOrder,
+	column config.CommitColumn,
+) int {
+	return presentation.CommitColumnIndex(commitColumnOrderForScreenMode(screenMode, order), column)
+}
+
+func commitMessageColumnForScreenMode(screenMode types.ScreenMode, order config.CommitColumnOrder) int {
+	column := commitColumnIndexForScreenMode(screenMode, order, config.CommitColumnMessage)
+	if column < 0 {
+		return 0
+	}
+	return column
+}
+
 func searchModelCommits(caseSensitive bool, commits []*models.Commit, columnPositions []int,
-	modelToViewIndex func(int) int, searchStr string,
+	hashColumnIndex int, modelToViewIndex func(int) int, searchStr string,
 ) []gocui.SearchPosition {
 	if columnPositions == nil {
 		// This should never happen. We are being called at a time where our
@@ -366,9 +408,21 @@ func searchModelCommits(caseSensitive bool, commits []*models.Commit, columnPosi
 		// The XStart and XEnd values are only used if the search string can't
 		// be found in the view. This can really only happen if the user is
 		// searching for a commit hash that is longer than the truncated hash
-		// that we render. So we just set the XStart and XEnd values to the
-		// start and end of the commit hash column, which is the second one.
-		result := gocui.SearchPosition{XStart: columnPositions[1], XEnd: columnPositions[2] - 1, Y: modelToViewIndex(idx)}
+		// that we render. So we use the start and end of the commit hash
+		// column, or an invisible position if that column is configured away.
+		xStart, xEnd := -1, -1
+		if hashColumnIndex >= 0 && hashColumnIndex < len(columnPositions) {
+			xStart = columnPositions[hashColumnIndex]
+			if hashColumnIndex+1 < len(columnPositions) {
+				xEnd = columnPositions[hashColumnIndex+1] - 1
+			} else {
+				// The renderer has no end sentinel for its final column. A hash
+				// consists only of single-width ASCII characters, and extending to
+				// its model length is safe because no later column can be highlighted.
+				xEnd = xStart + len(commit.Hash())
+			}
+		}
+		result := gocui.SearchPosition{XStart: xStart, XEnd: xEnd, Y: modelToViewIndex(idx)}
 		return result, strings.Contains(normalize(commit.Hash()), searchStr) ||
 			strings.Contains(normalize(commit.Name), searchStr) ||
 			strings.Contains(normalize(commit.ExtraInfo), searchStr) // allow searching for tags

@@ -395,3 +395,40 @@ func TestUserConfigValidate_diffRenderers(t *testing.T) {
 		})
 	}
 }
+
+func TestUserConfigValidate_commitColumnOrder(t *testing.T) {
+	scenarios := []struct {
+		name        string
+		order       CommitColumnOrder
+		expectedErr string
+	}{
+		{name: "unset"},
+		{name: "empty", order: CommitColumnOrder{}},
+		{name: "all columns", order: CommitColumnOrder{CommitColumnHash, CommitColumnTime, CommitColumnAuthor, CommitColumnMessage}},
+		{name: "reordered subset", order: CommitColumnOrder{CommitColumnMessage, CommitColumnAuthor, CommitColumnTime}},
+		{
+			name:        "unknown column",
+			order:       CommitColumnOrder{CommitColumn("bogus")},
+			expectedErr: "gui.commitColumnOrder: unknown column 'bogus'. Allowed values: hash, time, author, message",
+		},
+		{
+			name:        "duplicate column",
+			order:       CommitColumnOrder{CommitColumnMessage, CommitColumnMessage},
+			expectedErr: "gui.commitColumnOrder: 'message' is listed more than once; each column may appear only once.",
+		},
+	}
+
+	for _, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			config := GetDefaultConfig()
+			config.Gui.CommitColumnOrder = scenario.order
+
+			err := config.Validate()
+			if scenario.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, scenario.expectedErr)
+			}
+		})
+	}
+}

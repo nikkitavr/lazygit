@@ -180,6 +180,13 @@ type GuiConfig struct {
 	CommitAuthorShortLength int `yaml:"commitAuthorShortLength"`
 	// Length of author name in expanded commits view. 2 means show initials only.
 	CommitAuthorLongLength int `yaml:"commitAuthorLongLength"`
+	// Columns to show in the commits view when in half screen mode, in the order they should appear.
+	// Valid values are: 'hash', 'time', 'author', 'message'.
+	// The 'message' column includes the graph, refs, conflict/base/rebase markers, and commit message.
+	// When this list is non-empty, commit type/divergence, bisect, and rebase-action indicators remain visible before the configured columns.
+	// For example: ['message', 'author', 'time', 'hash'].
+	// An empty list preserves the legacy layout; otherwise, omitted columns are hidden and this setting takes precedence over settings that would hide an included column.
+	CommitColumnOrder CommitColumnOrder `yaml:"commitColumnOrder" jsonschema:"uniqueItems=true"`
 	// Length of commit hash in commits view. 0 shows '*' if NF icons aren't on.
 	CommitHashLength int `yaml:"commitHashLength" jsonschema:"minimum=0"`
 	// If true, show commit hashes alongside branch names in the branches view.

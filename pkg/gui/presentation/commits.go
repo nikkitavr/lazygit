@@ -2,6 +2,7 @@ package presentation
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/commands/git_commands"
 	"github.com/jesseduffield/lazygit/pkg/commands/models"
 	"github.com/jesseduffield/lazygit/pkg/common"
+	"github.com/jesseduffield/lazygit/pkg/config"
 	"github.com/jesseduffield/lazygit/pkg/gui/presentation/authors"
 	"github.com/jesseduffield/lazygit/pkg/gui/presentation/graph"
 	"github.com/jesseduffield/lazygit/pkg/gui/presentation/icons"
@@ -32,6 +34,8 @@ var (
 	mutex        deadlock.Mutex
 )
 
+const commitStructuralColumnCount = 3
+
 type bisectBounds struct {
 	newIndex int
 	oldIndex int
@@ -44,6 +48,7 @@ func GetCommitListDisplayStrings(
 	currentBranchName string,
 	hasRebaseUpdateRefsConfig bool,
 	fullDescription bool,
+	commitColumnOrder config.CommitColumnOrder,
 	cherryPickedCommitHashSet *set.Set[string],
 	diffName string,
 	markedBaseCommit string,
@@ -202,6 +207,7 @@ func GetCommitListDisplayStrings(
 			parseEmoji,
 			getGraphLine(unfilteredIdx),
 			fullDescription,
+			commitColumnOrder,
 			bisectStatus,
 			bisectInfo,
 		))
@@ -353,6 +359,7 @@ func displayCommit(
 	parseEmoji bool,
 	graphLine string,
 	fullDescription bool,
+	commitColumnOrder config.CommitColumnOrder,
 	bisectStatus BisectStatus,
 	bisectInfo *git_commands.BisectInfo,
 ) []string {
@@ -361,6 +368,9 @@ func displayCommit(
 	hashString := ""
 	hashColor := getHashColor(commit, diffName, cherryPickedCommitHashSet, bisectStatus, bisectInfo)
 	hashLength := common.UserConfig().Gui.CommitHashLength
+	if len(commitColumnOrder) > 0 && slices.Contains(commitColumnOrder, config.CommitColumnHash) && hashLength <= 0 {
+		hashLength = utils.COMMIT_HASH_SHORT_SIZE
+	}
 	if hashLength >= len(commit.Hash()) {
 		hashString = hashColor.Sprint(commit.Hash())
 	} else if hashLength > 0 {
@@ -437,7 +447,35 @@ func displayCommit(
 	if fullDescription {
 		authorLength = common.UserConfig().Gui.CommitAuthorLongLength
 	}
+	if len(commitColumnOrder) > 0 && slices.Contains(commitColumnOrder, config.CommitColumnAuthor) {
+		authorLength = max(authorLength, 2)
+	}
 	author := authors.AuthorWithLength(commit.AuthorName, authorLength)
+	message := graphLine + mark + tagString + theme.DefaultTextColor.Sprint(name)
+
+	if len(commitColumnOrder) > 0 {
+		cols := make([]string, 0, commitStructuralColumnCount+len(commitColumnOrder))
+		cols = append(cols, divergenceString, bisectString, actionString)
+		for _, column := range commitColumnOrder {
+			switch column {
+			case config.CommitColumnHash:
+				cols = append(cols, hashString)
+			case config.CommitColumnTime:
+				cols = append(cols, descriptionString)
+			case config.CommitColumnAuthor:
+				cols = append(cols, author)
+			case config.CommitColumnMessage:
+				cols = append(cols, message)
+			}
+		}
+		if cols[len(cols)-1] == "" {
+			// RenderDisplayStrings cannot restore a trailing column when every row
+			// leaves it blank. A placeholder keeps column indexes stable and also
+			// ensures that an otherwise empty commit still produces a list row.
+			cols[len(cols)-1] = " "
+		}
+		return cols
+	}
 
 	cols := make([]string, 0, 7)
 	cols = append(
@@ -448,10 +486,34 @@ func displayCommit(
 		descriptionString,
 		actionString,
 		author,
-		graphLine+mark+tagString+theme.DefaultTextColor.Sprint(name),
+		message,
 	)
 
 	return cols
+}
+
+func CommitColumnIndex(order config.CommitColumnOrder, column config.CommitColumn) int {
+	if len(order) == 0 {
+		switch column {
+		case config.CommitColumnHash:
+			return 1
+		case config.CommitColumnTime:
+			return 3
+		case config.CommitColumnAuthor:
+			return 5
+		case config.CommitColumnMessage:
+			return 6
+		}
+	}
+
+	index := slices.Index(order, column)
+	if index < 0 {
+		return -1
+	}
+
+	// Divergence, bisect, and rebase-action indicators are structural columns
+	// that remain visible regardless of the configured data columns.
+	return commitStructuralColumnCount + index
 }
 
 func getBisectStatusColor(status BisectStatus) style.TextStyle {

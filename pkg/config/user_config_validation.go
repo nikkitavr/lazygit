@@ -61,6 +61,27 @@ func (config *UserConfig) Validate() error {
 	if err := validateSidePanels(config.Gui.SidePanels); err != nil {
 		return err
 	}
+	if err := validateCommitColumnOrder(config.Gui.CommitColumnOrder); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateCommitColumnOrder(order CommitColumnOrder) error {
+	seen := map[CommitColumn]bool{}
+	allowedValues := strings.Join(lo.Map(ValidCommitColumns,
+		func(column CommitColumn, _ int) string { return string(column) }), ", ")
+
+	for _, column := range order {
+		if !slices.Contains(ValidCommitColumns, column) {
+			return fmt.Errorf("gui.commitColumnOrder: unknown column '%s'. Allowed values: %s", column, allowedValues)
+		}
+		if seen[column] {
+			return fmt.Errorf("gui.commitColumnOrder: '%s' is listed more than once; each column may appear only once.", column)
+		}
+		seen[column] = true
+	}
+
 	return nil
 }
 

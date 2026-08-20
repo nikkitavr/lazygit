@@ -10,6 +10,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/commands/git_commands"
 	"github.com/jesseduffield/lazygit/pkg/commands/models"
 	"github.com/jesseduffield/lazygit/pkg/common"
+	"github.com/jesseduffield/lazygit/pkg/config"
 	"github.com/jesseduffield/lazygit/pkg/utils"
 	"github.com/samber/lo"
 	"github.com/stefanhaller/git-todo-parser/todo"
@@ -29,6 +30,7 @@ func TestGetCommitListDisplayStrings(t *testing.T) {
 		currentBranchName         string
 		hasUpdateRefConfig        bool
 		fullDescription           bool
+		commitColumnOrder         config.CommitColumnOrder
 		cherryPickedCommitHashSet *set.Set[string]
 		markedBaseCommit          string
 		diffName                  string
@@ -43,6 +45,7 @@ func TestGetCommitListDisplayStrings(t *testing.T) {
 		bisectInfo                *git_commands.BisectInfo
 		expected                  string
 		focus                     bool
+		setupConfig               func(*common.Common)
 	}{
 		{
 			testName:                  "no commits",
@@ -506,6 +509,118 @@ func TestGetCommitListDisplayStrings(t *testing.T) {
 				`),
 		},
 		{
+			testName: "empty half-screen column order preserves legacy layout",
+			commitOpts: []models.NewCommitOpts{
+				{Name: "commit1", Hash: "hash1"},
+			},
+			fullDescription:           true,
+			commitColumnOrder:         config.CommitColumnOrder{},
+			startIdx:                  0,
+			endIdx:                    1,
+			showGraph:                 false,
+			bisectInfo:                git_commands.NewNullBisectInfo(),
+			cherryPickedCommitHashSet: set.New[string](),
+			now:                       time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+			setupConfig: func(c *common.Common) {
+				c.UserConfig().Gui.CommitAuthorLongLength = 0
+			},
+			expected: "hash1 commit1",
+		},
+		{
+			testName: "custom half-screen column order",
+			commitOpts: []models.NewCommitOpts{
+				{Name: "commit1", Hash: "hash1", UnixTimestamp: 1577844184, AuthorName: "Jesse Duffield"},
+				{Name: "commit2", Hash: "hash2", UnixTimestamp: 1576844184, AuthorName: "Jesse Duffield"},
+			},
+			fullDescription:           true,
+			commitColumnOrder:         config.CommitColumnOrder{config.CommitColumnMessage, config.CommitColumnAuthor, config.CommitColumnTime, config.CommitColumnHash},
+			timeFormat:                "2006-01-02",
+			shortTimeFormat:           "3:04PM",
+			startIdx:                  0,
+			endIdx:                    2,
+			showGraph:                 false,
+			bisectInfo:                git_commands.NewNullBisectInfo(),
+			cherryPickedCommitHashSet: set.New[string](),
+			now:                       time.Date(2020, 1, 1, 5, 3, 4, 0, time.UTC),
+			expected: formatExpected(`
+		commit1 Jesse Duffield    2:03AM     hash1
+		commit2 Jesse Duffield    2019-12-20 hash2
+						`),
+		},
+		{
+			testName: "custom half-screen column subset hides omitted columns",
+			commitOpts: []models.NewCommitOpts{
+				{Name: "commit1", Hash: "hash1", UnixTimestamp: 1577844184, AuthorName: "Jesse Duffield"},
+				{Name: "commit2", Hash: "hash2", UnixTimestamp: 1576844184, AuthorName: "Jesse Duffield"},
+			},
+			fullDescription:           true,
+			commitColumnOrder:         config.CommitColumnOrder{config.CommitColumnMessage, config.CommitColumnTime},
+			timeFormat:                "2006-01-02",
+			shortTimeFormat:           "3:04PM",
+			startIdx:                  0,
+			endIdx:                    2,
+			showGraph:                 false,
+			bisectInfo:                git_commands.NewNullBisectInfo(),
+			cherryPickedCommitHashSet: set.New[string](),
+			now:                       time.Date(2020, 1, 1, 5, 3, 4, 0, time.UTC),
+			expected: formatExpected(`
+		commit1 2:03AM
+		commit2 2019-12-20
+						`),
+		},
+		{
+			testName: "custom half-screen columns override legacy hiding",
+			commitOpts: []models.NewCommitOpts{
+				{Name: "commit1", Hash: "hash1", AuthorName: "Jesse Duffield"},
+			},
+			fullDescription:           true,
+			commitColumnOrder:         config.CommitColumnOrder{config.CommitColumnMessage, config.CommitColumnAuthor, config.CommitColumnHash},
+			startIdx:                  0,
+			endIdx:                    1,
+			showGraph:                 false,
+			bisectInfo:                git_commands.NewNullBisectInfo(),
+			cherryPickedCommitHashSet: set.New[string](),
+			now:                       time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+			setupConfig: func(c *common.Common) {
+				c.UserConfig().Gui.CommitAuthorLongLength = 0
+				c.UserConfig().Gui.CommitHashLength = 0
+			},
+			expected: "commit1 JD hash1",
+		},
+		{
+			testName: "custom half-screen columns keep structural indicators and hide message decorations",
+			commitOpts: []models.NewCommitOpts{
+				{Name: "commit1", Hash: "hash1", Parents: []string{"hash2"}, AuthorName: "Jesse Duffield", Status: models.StatusConflicted, Action: todo.Pick, Divergence: models.DivergenceRight},
+			},
+			fullDescription:           true,
+			commitColumnOrder:         config.CommitColumnOrder{config.CommitColumnAuthor},
+			startIdx:                  0,
+			endIdx:                    1,
+			showGraph:                 true,
+			bisectInfo:                git_commands.NewNullBisectInfo(),
+			cherryPickedCommitHashSet: set.New[string](),
+			now:                       time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+			setupConfig: func(c *common.Common) {
+				c.UserConfig().Gui.CommitAuthorLongLength = 2
+			},
+			expected: "↓ pick JD",
+		},
+		{
+			testName: "custom half-screen columns preserve an otherwise empty row",
+			commitOpts: []models.NewCommitOpts{
+				{Hash: "hash1"},
+			},
+			fullDescription:           true,
+			commitColumnOrder:         config.CommitColumnOrder{config.CommitColumnMessage},
+			startIdx:                  0,
+			endIdx:                    1,
+			showGraph:                 false,
+			bisectInfo:                git_commands.NewNullBisectInfo(),
+			cherryPickedCommitHashSet: set.New[string](),
+			now:                       time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+			expected:                  " ",
+		},
+		{
 			testName: "custom time format",
 			commitOpts: []models.NewCommitOpts{
 				{Name: "commit1", Hash: "hash1", UnixTimestamp: 1577844184, AuthorName: "Jesse Duffield"},
@@ -537,11 +652,14 @@ func TestGetCommitListDisplayStrings(t *testing.T) {
 		}
 	}
 
-	common := common.NewDummyCommon()
-
 	for _, s := range scenarios {
 		if !focusing || s.focus {
 			t.Run(s.testName, func(t *testing.T) {
+				common := common.NewDummyCommon()
+				if s.setupConfig != nil {
+					s.setupConfig(common)
+				}
+
 				hashPool := &utils.StringPool{}
 
 				commits := lo.Map(s.commitOpts,
@@ -554,6 +672,7 @@ func TestGetCommitListDisplayStrings(t *testing.T) {
 					s.currentBranchName,
 					s.hasUpdateRefConfig,
 					s.fullDescription,
+					s.commitColumnOrder,
 					s.cherryPickedCommitHashSet,
 					s.diffName,
 					s.markedBaseCommit,
@@ -576,4 +695,25 @@ func TestGetCommitListDisplayStrings(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestCommitColumnIndex(t *testing.T) {
+	t.Run("legacy layout", func(t *testing.T) {
+		assert.Equal(t, 1, CommitColumnIndex(nil, config.CommitColumnHash))
+		assert.Equal(t, 3, CommitColumnIndex(nil, config.CommitColumnTime))
+		assert.Equal(t, 5, CommitColumnIndex(nil, config.CommitColumnAuthor))
+		assert.Equal(t, 6, CommitColumnIndex(nil, config.CommitColumnMessage))
+	})
+
+	t.Run("custom layout", func(t *testing.T) {
+		order := config.CommitColumnOrder{
+			config.CommitColumnMessage,
+			config.CommitColumnAuthor,
+			config.CommitColumnTime,
+		}
+		assert.Equal(t, -1, CommitColumnIndex(order, config.CommitColumnHash))
+		assert.Equal(t, 5, CommitColumnIndex(order, config.CommitColumnTime))
+		assert.Equal(t, 4, CommitColumnIndex(order, config.CommitColumnAuthor))
+		assert.Equal(t, 3, CommitColumnIndex(order, config.CommitColumnMessage))
+	})
 }
